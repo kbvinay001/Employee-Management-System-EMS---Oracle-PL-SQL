@@ -1,0 +1,345 @@
+-- =====================================================
+-- EMPLOYEE MANAGEMENT SYSTEM - COMPLETE PL/SQL PROJECT
+-- =====================================================
+
+-- Step 1: Clean up existing objects (if they exist)
+BEGIN
+    EXECUTE IMMEDIATE 'DROP TABLE employee_audit CASCADE CONSTRAINTS';
+    EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    EXECUTE IMMEDIATE 'DROP TABLE employees CASCADE CONSTRAINTS';
+    EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    EXECUTE IMMEDIATE 'DROP TABLE departments CASCADE CONSTRAINTS';
+    EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    EXECUTE IMMEDIATE 'DROP SEQUENCE emp_seq';
+    EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+-- Step 2: Create Tables
+-- Departments Table
+CREATE TABLE departments (
+    dept_id NUMBER(10) PRIMARY KEY,
+    dept_name VARCHAR2(50) NOT NULL,
+    location VARCHAR2(50),
+    manager_id NUMBER(10)
+);
+
+-- Employees Table
+CREATE TABLE employees (
+    emp_id NUMBER(10) PRIMARY KEY,
+    first_name VARCHAR2(50) NOT NULL,
+    last_name VARCHAR2(50) NOT NULL,
+    email VARCHAR2(100) UNIQUE NOT NULL,
+    phone VARCHAR2(20),
+    hire_date DATE DEFAULT SYSDATE,
+    job_title VARCHAR2(50),
+    salary NUMBER(10,2),
+    dept_id NUMBER(10),
+    manager_id NUMBER(10),
+    is_active CHAR(1) DEFAULT 'Y' CHECK (is_active IN ('Y','N')),
+    CONSTRAINT fk_emp_dept FOREIGN KEY (dept_id) REFERENCES departments(dept_id),
+    CONSTRAINT fk_emp_manager FOREIGN KEY (manager_id) REFERENCES employees(emp_id)
+);
+
+-- Employee Audit Table
+CREATE TABLE employee_audit (
+    audit_id NUMBER(10) PRIMARY KEY,
+    emp_id NUMBER(10),
+    action VARCHAR2(10),
+    old_salary NUMBER(10,2),
+    new_salary NUMBER(10,2),
+    changed_by VARCHAR2(50),
+    change_date DATE DEFAULT SYSDATE
+);
+
+-- Step 3: Create Sequences
+CREATE SEQUENCE emp_seq START WITH 1000 INCREMENT BY 1;
+CREATE SEQUENCE audit_seq START WITH 1 INCREMENT BY 1;
+
+-- Step 4: Insert Sample Data
+-- Insert Departments
+INSERT INTO departments VALUES (10, 'Human Resources', 'New York', NULL);
+INSERT INTO departments VALUES (20, 'Finance', 'Chicago', NULL);
+INSERT INTO departments VALUES (30, 'Engineering', 'San Francisco', NULL);
+INSERT INTO departments VALUES (40, 'Marketing', 'Los Angeles', NULL);
+
+-- Insert Employees
+INSERT INTO employees VALUES (emp_seq.NEXTVAL, 'John', 'Smith', 'john.smith@company.com', '555-0101', DATE '2020-01-15', 'HR Manager', 75000, 10, NULL, 'Y');
+INSERT INTO employees VALUES (emp_seq.NEXTVAL, 'Sarah', 'Johnson', 'sarah.johnson@company.com', '555-0102', DATE '2019-03-22', 'Finance Director', 85000, 20, NULL, 'Y');
+INSERT INTO employees VALUES (emp_seq.NEXTVAL, 'Mike', 'Davis', 'mike.davis@company.com', '555-0103', DATE '2021-06-10', 'Senior Developer', 80000, 30, NULL, 'Y');
+INSERT INTO employees VALUES (emp_seq.NEXTVAL, 'Lisa', 'Wilson', 'lisa.wilson@company.com', '555-0104', DATE '2020-09-05', 'Marketing Specialist', 55000, 40, NULL, 'Y');
+INSERT INTO employees VALUES (emp_seq.NEXTVAL, 'David', 'Brown', 'david.brown@company.com', '555-0105', DATE '2022-01-20', 'HR Assistant', 45000, 10, 1000, 'Y');
+
+COMMIT;
+
+-- Step 5: Create Stored Procedures
+
+-- Procedure to add a new employee
+CREATE OR REPLACE PROCEDURE add_employee(
+    p_first_name VARCHAR2,
+    p_last_name VARCHAR2,
+    p_email VARCHAR2,
+    p_phone VARCHAR2 DEFAULT NULL,
+    p_job_title VARCHAR2,
+    p_salary NUMBER,
+    p_dept_id NUMBER,
+    p_manager_id NUMBER DEFAULT NULL
+) IS
+    v_emp_id NUMBER;
+BEGIN
+    -- Get next employee ID
+    v_emp_id := emp_seq.NEXTVAL;
+    
+    -- Insert new employee
+    INSERT INTO employees (
+        emp_id, first_name, last_name, email, phone, 
+        hire_date, job_title, salary, dept_id, manager_id, is_active
+    ) VALUES (
+        v_emp_id, p_first_name, p_last_name, p_email, p_phone,
+        SYSDATE, p_job_title, p_salary, p_dept_id, p_manager_id, 'Y'
+    );
+    
+    COMMIT;
+    DBMS_OUTPUT.PUT_LINE('Employee added successfully with ID: ' || v_emp_id);
+    
+EXCEPTION
+    WHEN DUP_VAL_ON_INDEX THEN
+        DBMS_OUTPUT.PUT_LINE('Error: Email already exists');
+        ROLLBACK;
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Error adding employee: ' || SQLERRM);
+        ROLLBACK;
+END add_employee;
+/
+
+-- Procedure to update employee salary
+CREATE OR REPLACE PROCEDURE update_salary(
+    p_emp_id NUMBER,
+    p_new_salary NUMBER
+) IS
+    v_old_salary NUMBER;
+    v_emp_count NUMBER;
+BEGIN
+    -- Check if employee exists
+    SELECT COUNT(*), NVL(MAX(salary), 0)
+    INTO v_emp_count, v_old_salary
+    FROM employees 
+    WHERE emp_id = p_emp_id AND is_active = 'Y';
+    
+    IF v_emp_count = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('Error: Employee not found or inactive');
+        RETURN;
+    END IF;
+    
+    -- Update salary
+    UPDATE employees 
+    SET salary = p_new_salary 
+    WHERE emp_id = p_emp_id;
+    
+    -- Log the change in audit table
+    INSERT INTO employee_audit (
+        audit_id, emp_id, action, old_salary, new_salary, changed_by, change_date
+    ) VALUES (
+        audit_seq.NEXTVAL, p_emp_id, 'UPDATE', v_old_salary, p_new_salary, USER, SYSDATE
+    );
+    
+    COMMIT;
+    DBMS_OUTPUT.PUT_LINE('Salary updated successfully for Employee ID: ' || p_emp_id);
+    DBMS_OUTPUT.PUT_LINE('Old Salary: $' || v_old_salary || ' -> New Salary: $' || p_new_salary);
+    
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Error updating salary: ' || SQLERRM);
+        ROLLBACK;
+END update_salary;
+/
+
+-- Step 6: Create Functions
+
+-- Function to get employee full name
+CREATE OR REPLACE FUNCTION get_employee_name(p_emp_id NUMBER)
+RETURN VARCHAR2 IS
+    v_full_name VARCHAR2(101);
+BEGIN
+    SELECT first_name || ' ' || last_name
+    INTO v_full_name
+    FROM employees
+    WHERE emp_id = p_emp_id AND is_active = 'Y';
+    
+    RETURN v_full_name;
+    
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN 'Employee not found';
+    WHEN OTHERS THEN
+        RETURN 'Error: ' || SQLERRM;
+END get_employee_name;
+/
+
+-- Function to calculate annual bonus (10% of salary)
+CREATE OR REPLACE FUNCTION calculate_bonus(p_emp_id NUMBER)
+RETURN NUMBER IS
+    v_salary NUMBER;
+    v_bonus NUMBER;
+BEGIN
+    SELECT salary
+    INTO v_salary
+    FROM employees
+    WHERE emp_id = p_emp_id AND is_active = 'Y';
+    
+    v_bonus := v_salary * 0.10; -- 10% bonus
+    RETURN v_bonus;
+    
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN 0;
+    WHEN OTHERS THEN
+        RETURN -1;
+END calculate_bonus;
+/
+
+-- Step 7: Create Triggers
+
+-- Trigger to automatically update audit table on salary changes
+CREATE OR REPLACE TRIGGER trg_salary_audit
+    AFTER UPDATE OF salary ON employees
+    FOR EACH ROW
+WHEN (OLD.salary != NEW.salary)
+BEGIN
+    INSERT INTO employee_audit (
+        audit_id, emp_id, action, old_salary, new_salary, changed_by, change_date
+    ) VALUES (
+        audit_seq.NEXTVAL, :NEW.emp_id, 'TRIGGER', :OLD.salary, :NEW.salary, USER, SYSDATE
+    );
+END trg_salary_audit;
+/
+
+-- Step 8: Create Views
+
+-- View for employee summary
+CREATE OR REPLACE VIEW employee_summary AS
+SELECT 
+    e.emp_id,
+    e.first_name || ' ' || e.last_name AS full_name,
+    e.email,
+    e.job_title,
+    TO_CHAR(e.salary, '$999,999.99') AS formatted_salary,
+    d.dept_name,
+    e.hire_date,
+    CASE WHEN e.manager_id IS NOT NULL THEN get_employee_name(e.manager_id) ELSE 'No Manager' END AS manager_name
+FROM employees e
+LEFT JOIN departments d ON e.dept_id = d.dept_id
+WHERE e.is_active = 'Y';
+
+-- Step 9: Sample PL/SQL Block with Exception Handling
+-- Demonstration block showing various operations
+
+SET SERVEROUTPUT ON
+
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('=== EMPLOYEE MANAGEMENT SYSTEM DEMO ===');
+    DBMS_OUTPUT.PUT_LINE('');
+    
+    -- Display current employees
+    DBMS_OUTPUT.PUT_LINE('Current Employees:');
+    FOR emp_rec IN (SELECT emp_id, first_name, last_name, job_title, salary FROM employees WHERE is_active = 'Y') LOOP
+        DBMS_OUTPUT.PUT_LINE('ID: ' || emp_rec.emp_id || 
+                           ' | Name: ' || emp_rec.first_name || ' ' || emp_rec.last_name ||
+                           ' | Title: ' || emp_rec.job_title ||
+                           ' | Salary: $' || emp_rec.salary);
+    END LOOP;
+    
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('--- Adding New Employee ---');
+    
+    -- Add a new employee
+    add_employee(
+        p_first_name => 'Alice',
+        p_last_name => 'Cooper',
+        p_email => 'alice.cooper@company.com',
+        p_phone => '555-0199',
+        p_job_title => 'Data Analyst',
+        p_salary => 65000,
+        p_dept_id => 30,
+        p_manager_id => 1002
+    );
+    
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('--- Testing Functions ---');
+    
+    -- Test functions
+    DBMS_OUTPUT.PUT_LINE('Employee 1000 name: ' || get_employee_name(1000));
+    DBMS_OUTPUT.PUT_LINE('Employee 1001 bonus: $' || calculate_bonus(1001));
+    
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('--- Updating Salary ---');
+    
+    -- Update salary (this will trigger the audit)
+    update_salary(1000, 78000);
+    
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('--- Salary Change History ---');
+    
+    -- Display audit records
+    FOR audit_rec IN (SELECT * FROM employee_audit ORDER BY change_date DESC) LOOP
+        DBMS_OUTPUT.PUT_LINE('Employee ID: ' || audit_rec.emp_id ||
+                           ' | Action: ' || audit_rec.action ||
+                           ' | Old: $' || NVL(audit_rec.old_salary, 0) ||
+                           ' | New: $' || NVL(audit_rec.new_salary, 0) ||
+                           ' | Date: ' || TO_CHAR(audit_rec.change_date, 'DD-MON-YYYY HH24:MI:SS'));
+    END LOOP;
+    
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('=== DEMO COMPLETED SUCCESSFULLY ===');
+    
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Error in demo: ' || SQLERRM);
+END;
+/
+
+-- Step 10: Additional Queries for Testing
+
+-- Query to show employee summary using the view
+SELECT * FROM employee_summary ORDER BY full_name;
+
+-- Query to show department statistics
+SELECT 
+    d.dept_name,
+    COUNT(e.emp_id) as employee_count,
+    TO_CHAR(AVG(e.salary), '$999,999.99') as avg_salary,
+    TO_CHAR(SUM(e.salary), '$999,999.99') as total_salary
+FROM departments d
+LEFT JOIN employees e ON d.dept_id = e.dept_id AND e.is_active = 'Y'
+GROUP BY d.dept_name
+ORDER BY d.dept_name;
+
+-- Show recent audit trail
+SELECT 
+    ea.audit_id,
+    get_employee_name(ea.emp_id) as employee_name,
+    ea.action,
+    TO_CHAR(ea.old_salary, '$999,999.99') as old_salary,
+    TO_CHAR(ea.new_salary, '$999,999.99') as new_salary,
+    ea.changed_by,
+    TO_CHAR(ea.change_date, 'DD-MON-YYYY HH24:MI:SS') as change_date
+FROM employee_audit ea
+ORDER BY ea.change_date DESC;
+
+-- Final confirmation message
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('All objects created successfully! You can now run queries and test the procedures.');
+END;
+/
