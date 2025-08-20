@@ -1,0 +1,7 @@
+"EMP_ID","FULL_NAME","EMAIL","JOB_TITLE","FORMATTED_SALARY","DEPT_NAME","HIRE_DATE","MANAGER_NAME"
+1005,"Alice Cooper","alice.cooper@company.com","Data Analyst","  $65,000.00","Engineering","2025-08-20T15:08:15Z","Mike Davis"
+1004,"David Brown","david.brown@company.com","HR Assistant","  $45,000.00","Human Resources","2022-01-20T00:00:00Z","John Smith"
+1000,"John Smith","john.smith@company.com","HR Manager","  $78,000.00","Human Resources","2020-01-15T00:00:00Z","No Manager"
+1003,"Lisa Wilson","lisa.wilson@company.com","Marketing Specialist","  $55,000.00","Marketing","2020-09-05T00:00:00Z","No Manager"
+1002,"Mike Davis","mike.davis@company.com","Senior Developer","  $80,000.00","Engineering","2021-06-10T00:00:00Z","No Manager"
+1001,"Sarah Johnson","sarah.johnson@company.com","Finance Director","  $85,000.00","Finance","2019-03-22T00:00:00Z","No Manager"
